@@ -21,6 +21,10 @@ description:         Please see the README on GitHub at <https://github.com/kazn
 
 dependencies:
 - base >= 4.7 && < 5
+- placeholders
+- mtl
+- random
+- random-shuffle
 
 library:
   source-dirs: src
