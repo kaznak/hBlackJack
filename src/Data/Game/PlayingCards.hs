@@ -12,14 +12,14 @@ module Data.Game.PlayingCards
     , Side(..)
 
     , flipCard
+    , frontCard
+    , viewCard
 
     , makeDeck
     , flipDeck
     , shuffleDeck
-    , drawCard
+    , drawCards
     ) where
-
-import Development.Placeholders
 
 import System.Random.Shuffle
 
@@ -37,17 +37,16 @@ data Value = Ace  | Two   | Three | Four | Five
 data Side = Back | Front
   deriving (Show, Read, Eq, Ord, Enum, Bounded)
 
--- | !FUTER WORKS! To apply this Card type to agent system,
--- uniq id is require for each Card and
--- it's value must be designate independently
--- from the card Suit and Value.
+-- | BackCard is other players hand and used to represent unknown card.
 data Card = Card
   { suit  :: Suit
   , value :: Value
   , side  :: Side
   } | Jorker
   { side :: Side
-  } deriving (Show, Read, Eq, Ord)
+  } | BackCard
+  deriving (Show, Read, Eq, Ord)
+
 
 ------------------------------------------------------------------------
 makeDeck
@@ -55,9 +54,7 @@ makeDeck
   -> [Card]
 makeDeck nj = cards ++ jorkers
   where jorkers = take nj $ repeat $ Jorker Front
-        cards = [ Card suit value Front |
-                  suit <- [Club .. Spade],
-                  value <- [Ace .. King] ]
+        cards = [Card s v Front|s <- [Club .. Spade], v <- [Ace .. King]]
 
 ------------------------------------------------------------------------
 flipCard
@@ -67,6 +64,25 @@ flipCard (Jorker Front)   = Jorker Back
 flipCard (Jorker Back)    = Jorker Front
 flipCard (Card s v Front) = Card s v Back
 flipCard (Card s v Back)  = Card s v Front
+flipCard BackCard         = error "try to flip BackCard."
+
+------------------------------------------------------------------------
+frontCard
+  :: Card
+  -> Card
+frontCard (Jorker _)    = Jorker Front
+frontCard (Card s v _)  = Card s v Front
+frontCard BackCard      = error "try to flip BackCard."
+
+------------------------------------------------------------------------
+viewCard
+  :: Card
+  -> Card
+viewCard (Jorker Front)   = Jorker Back
+viewCard (Jorker Back)    = BackCard
+viewCard (Card s v Front) = Card s v Back
+viewCard (Card _ _ Back)  = BackCard
+viewCard BackCard         = BackCard
 
 ------------------------------------------------------------------------
 flipDeck
@@ -82,8 +98,8 @@ shuffleDeck
 shuffleDeck deck r = shuffle deck r
 
 ------------------------------------------------------------------------
-drawCard
+drawCards
   :: [Card]           -- ^ Deck
   -> Int              -- ^ Number of cards
   -> ([Card], [Card]) -- ^ Took cards and Rest cards
-drawCard d n = (take n d, drop n d)
+drawCards d n = (take n d, drop n d)

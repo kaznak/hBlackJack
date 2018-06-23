@@ -1,6 +1,4 @@
 
--- | Simple BlackJack
-
 module Data.Game.PlayingCards.Player
     ( Player(..)
 
@@ -9,17 +7,11 @@ module Data.Game.PlayingCards.Player
     , addHand
     , dropHand
     , flipHand
+
+    , viewPlayer
     ) where
 
-import Development.Placeholders
-
 import qualified Data.Game.PlayingCards as PC
-import Data.List
-
-import System.Random
-import System.Random.Shuffle
-
-import Control.Monad.State.Lazy
 
 ------------------------------------------------------------------------
 data Player = Player
@@ -31,7 +23,7 @@ data Player = Player
 makePlayer
   :: String -- ^ player name
   -> Player
-makePlayer name = Player name []
+makePlayer n = Player n []
 
 ------------------------------------------------------------------------
 addHand
@@ -44,7 +36,7 @@ addHand cs (Player n h) = Player n (h ++ cs)
 dropHand
   :: Player    -- ^ previous player state
   -> Player    -- ^ next player state
-dropHand (Player n h) = Player n []
+dropHand (Player n _) = Player n []
 
 ------------------------------------------------------------------------
 flipHand
@@ -56,3 +48,11 @@ flipHand ind (Player n h) = Player n h'
     h' = p ++ [(PC.flipCard $ h !! ind)] ++ r
     p  = take ind h
     r  = drop (ind + 1) h
+
+------------------------------------------------------------------------
+viewPlayer
+  :: Player    -- ^ previous player state
+  -> Player    -- ^ next player state
+viewPlayer (Player n h) = Player n h'
+  where
+    h' = map PC.viewCard h

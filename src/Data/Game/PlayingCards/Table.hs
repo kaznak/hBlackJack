@@ -1,6 +1,4 @@
 
--- | Simple BlackJack
-
 module Data.Game.PlayingCards.Table
     ( Table(..)
 
@@ -11,17 +9,20 @@ module Data.Game.PlayingCards.Table
     , flipDeck
     , shuffleDeck
 
-    , renewShuffleDeck -- composed action
-    
     , clearGrave
     , reviveGrave
 
-    , drawCard
-
+    , findPlayer
+    , findPlayerSeat
     , addPlayer
-    ) where
 
-import Development.Placeholders
+    , drawCard
+    , drawCardFront
+
+    , viewTable
+
+    , initialTable -- composit function
+    ) where
 
 import Data.List
 import Data.Maybe
@@ -30,9 +31,6 @@ import qualified Data.Game.PlayingCards as PC
 import qualified Data.Game.PlayingCards.Player as PL
 
 import System.Random
-import System.Random.Shuffle
-
-import Control.Monad.State.Lazy
 
 ------------------------------------------------------------------------
 -- | A BlackJack Table data type.
@@ -59,13 +57,13 @@ makeTable seed seats = Table
 clearDeck
   :: Table -- ^ Previous table state
   -> Table -- ^ New table state
-clearDeck (Table gen _ g p) = (Table gen [] g p)
+clearDeck (Table rg _ g p) = (Table rg [] g p)
 
 ------------------------------------------------------------------------
 newDeck
   :: Table -- ^ Previous table state
   -> Table -- ^ New table state
-newDeck (Table gen _ g p) = (Table gen d g p)
+newDeck (Table rg _ g p) = (Table rg d g p)
   where
     d :: [PC.Card]
     d = PC.makeDeck 0
@@ -74,7 +72,7 @@ newDeck (Table gen _ g p) = (Table gen d g p)
 flipDeck
   :: Table -- ^ Previous table state
   -> Table -- ^ New table state
-flipDeck (Table gen d g p) = (Table gen (PC.flipDeck d) g p)
+flipDeck (Table rg d g p) = (Table rg (PC.flipDeck d) g p)
 
 ------------------------------------------------------------------------
 rseq :: RandomGen gen => Int -> gen -> ([Int],[gen])
@@ -83,40 +81,34 @@ rseq n = unzip . rseq' (n - 1)
 ------------------------------------------------------------------------
 rseq' :: RandomGen gen => Int -> gen -> [(Int, gen)]
 rseq' 0 _ = []
-rseq' i gen = (j, gen) : rseq' (i - 1) gen'
+rseq' i rg = (j, rg) : rseq' (i - 1) rg'
   where
-    (j, gen') = randomR (0, i) gen
+    (j, rg') = randomR (0, i) rg
 
 ------------------------------------------------------------------------
 shuffleDeck
   :: Table -- ^ Previous table state
   -> Table -- ^ New table state
-shuffleDeck (Table gen d g p) = (Table gen' d' g p)
+shuffleDeck (Table rg d g p) = (Table rg' d' g p)
   where
     d' = PC.shuffleDeck d r
 
     r = fst result
-    gen' = last $ snd result
+    rg' = last $ snd result
 
-    result = rseq (length d) gen
-
-------------------------------------------------------------------------
-renewShuffleDeck -- composed action
-  :: Table -- ^ Previous table state
-  -> Table -- ^ New table state
-renewShuffleDeck t = shuffleDeck $ flipDeck $ newDeck $ clearDeck t
+    result = rseq (length d) rg
 
 ------------------------------------------------------------------------
 clearGrave
   :: Table -- ^ Previous table state
   -> Table -- ^ New table state
-clearGrave (Table gen d g p) = (Table gen d [] p)
+clearGrave (Table rg d _ p) = (Table rg d [] p)
 
 ------------------------------------------------------------------------
 reviveGrave
   :: Table -- ^ Previous table state
   -> Table -- ^ New table state
-reviveGrave (Table gen d g p) = (Table gen (g ++ d) [] p)
+reviveGrave (Table rg d g p) = (Table rg (g ++ d) [] p)
 
 ------------------------------------------------------------------------
 findPlayerSeat
@@ -126,7 +118,15 @@ findPlayerSeat
 findPlayerSeat n (Table _ _ _ ps) = findIndex (isName n) ps
   where
     isName _ Nothing = False
-    isName name (Just (PL.Player n _)) = name == n
+    isName name (Just (PL.Player n' _)) = name == n'
+
+------------------------------------------------------------------------
+findPlayer
+  :: String          -- ^ player name
+  -> Table           -- ^ table
+  -> Maybe PL.Player -- ^ player
+findPlayer n (Table _ _ _ ps) =
+  find ((n==).PL.name) $ map fromJust $ filter isJust ps
 
 ------------------------------------------------------------------------
 findEmptySeat
@@ -147,54 +147,83 @@ addPlayer
   -> Int       -- ^ Seat Number
   -> Table     -- ^ Previous table state
   -> Table     -- ^ New table state
-addPlayer _ sn t                  | not $ isEmptySeat sn t      = error "seat is occupied."
-addPlayer (PL.Player n _) _ t     | isJust $ findPlayerSeat n t = error $ "player " ++ n ++ " already on seat."
-addPlayer p sn (Table gen d g ps) | otherwise                   = Table gen d g ps'
+addPlayer _ sn t               | not $ isEmptySeat sn t      = error "seat is occupied."
+addPlayer (PL.Player n _) _ t  | isJust $ findPlayerSeat n t = error $ "player " ++ n ++ " already on seat."
+addPlayer p sn t               | otherwise                   = updateSeat p sn t
+
+------------------------------------------------------------------------
+updateSeat
+  :: PL.Player -- ^ Player
+  -> Int       -- ^ Seat Number
+  -> Table     -- ^ Previous table state
+  -> Table     -- ^ New table state
+updateSeat p sn (Table rg d g ps) = Table rg d g ps'
   where
     ps'  = left ++ [Just p] ++ right
     left = take sn ps
     right = drop (sn+1) ps
 
 ------------------------------------------------------------------------
-drawCard
-  :: String -- ^ Player name
-  -> Table  -- ^ Previous table state
-  -> Table  -- ^ New table state
-drawCard n t@(Table gen d g ps) =
+drawCard'
+  :: (PC.Card -> PC.Card) -- ^ Action for card
+  -> String               -- ^ Player name
+  -> Table                -- ^ Previous table state
+  -> ([PC.Card], Table)     -- ^ Card and New table state
+drawCard' act n t@(Table rg d g ps) =
   if isNothing mi
   then error $ "player " ++ n ++ " is not seat."
-  else Table gen d' g ps'
+  else (cs', Table rg d' g ps')
   where
     mi = findPlayerSeat n t
     sn = fromJust mi
+    
+    (cs, d') = PC.drawCards d 1
+    cs' = map act cs
 
-    (c, d') = PC.drawCard d 1
-    ps' = left ++ [Just p'] ++ right
-    left = take sn ps
-    right = drop (sn+1) ps
-
-    Just (PL.Player name hand) = ps !! sn    
-    p' = PL.Player name $ c ++ hand
+    p' = PL.addHand cs' (fromJust $ ps!!sn)
+    (Table _ _ _ ps') = updateSeat p' sn t
 
 ------------------------------------------------------------------------
-drawFrontCard
-  :: String -- ^ Player name
-  -> Table  -- ^ Previous table state
-  -> Table  -- ^ New table state
-drawFrontCard n t@(Table gen d g ps) =
-  if isNothing mi
-  then error $ "player " ++ n ++ " is not seat."
-  else Table gen d' g ps'
+drawCard
+  :: String               -- ^ Player name
+  -> Table                -- ^ Previous table state
+  -> ([PC.Card], Table)     -- ^ Card and New table state
+drawCard = drawCard' id
+
+------------------------------------------------------------------------
+drawCardFront
+  :: String               -- ^ Player name
+  -> Table                -- ^ Previous table state
+  -> ([PC.Card], Table)     -- ^ Card and New table state
+drawCardFront = drawCard' PC.frontCard
+
+------------------------------------------------------------------------
+viewTable
+  :: String   -- ^ Player name
+  -> Table -- ^ Actual Table
+  -> Table -- ^ Players View Table
+viewTable n t | isNothing $ findPlayerSeat n t =
+                  error $ "player " ++ n ++ " does not seat."
+viewTable n (Table rg d g ps) | otherwise = Table rg d' g' ps'
   where
-    mi = findPlayerSeat n t
-    sn = fromJust mi
+    d' = map PC.viewCard d
+    g' = map PC.viewCard g
+    ps' = map viewSeat ps
 
-    ([PC.Card suit value side], d') = PC.drawCard d 1
-    c = [PC.Card suit value PC.Front]
-    
-    ps' = left ++ [Just p'] ++ right
-    left = take sn ps
-    right = drop (sn+1) ps
+    viewSeat Nothing  = Nothing
+    viewSeat s@(Just (PL.Player n' _)) | n' == n = s
+    viewSeat s | otherwise = fmap PL.viewPlayer s
 
-    Just (PL.Player name hand) = ps !! sn    
-    p' = PL.Player name $ c ++ hand
+------------------------------------------------------------------------
+------------------------------------------------------------------------
+initialTable -- composit function
+  :: Int   -- ^ seed of random generator
+  -> Table
+initialTable seed =
+  snd $ drawCard "Dealer" $ snd $ drawCardFront "Dealer" $ 
+  snd $ drawCard "Player" $ snd $ drawCardFront "Player" $ 
+  shuffleDeck $ flipDeck    $ newDeck $
+  clearDeck   $ clearGrave  $
+  addPlayer (PL.makePlayer "Player") 1 $
+  addPlayer (PL.makePlayer "Dealer") 0 $
+  makeTable seed 2
