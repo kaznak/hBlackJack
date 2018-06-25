@@ -15,13 +15,13 @@ module BlackJack
   ) where
 
 import Data.Char
-import Data.Functor
+-- import Data.Functor
 import Data.IORef
 
 import System.Random
 import System.Random.Shuffle
 
-import Control.Monad.State
+-- import Control.Monad.Error
 
 ------------------------------------------------------------------------
 -- | Card type definition.
@@ -71,68 +71,95 @@ toScore (Card _ v _) = score
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
-drawCard :: IORef [Card] -> IORef [Card] -> IO Card
-drawCard d p = do
-  cs <- readIORef d
-  writeIORef d $ tail cs
-  readIORef p >>= writeIORef p . (head cs:)
-  return (head cs)
+type Deck = IORef [Card]
+------------------------------------------------------------------------
+deck :: IO Deck
+deck = shuffleM fullSetCards >>= newIORef
 
 ------------------------------------------------------------------------
-printScore :: String -> ([Card] -> [Card]) -> IORef [Card] -> IO ()
-printScore name view p = do
-  hs <- readIORef p
-  putStrLn $ ((name ++) ": " ++ ) $ show $ view hs
-  putStrLn $ ((name ++) ": " ++ ) $ show $ sum $ map toScore hs
+type Player = IORef (String, [Card])
+
+dealer :: IO Player
+dealer = newIORef ("Dealer", [])
+
+player :: IO Player
+player = newIORef ("Player", [])
+
+------------------------------------------------------------------------
+draw' :: (Card -> Card) -> Player -> IO ()
+draw' op player = do
+  d <- deck
+  cs <- readIORef d
+  card <- return $ op $ head cs
+  (name, hand) <- readIORef player
+  writeIORef d $ tail cs
+  writeIORef player (name, card:hand)
+  putStrLn $ name ++ " draw " ++ (show card)
+
+drawFront :: Player -> IO()
+drawFront = draw' frontCard
+
+draw :: Player -> IO()
+draw = draw' id
   
 ------------------------------------------------------------------------
+checkStat :: ([Card] -> [Card]) -> Player -> IO Bool
+checkStat view player = do
+  (name, hand) <- readIORef player
+  score <- return $ sum $ map toScore hand
+  putStrLn $ ((name ++) ": " ++ ) $ show $ view hand
+  putStrLn $ ((name ++) ": " ++ ) $ show score
+  if score > 21
+    then putStrLn (name ++ ": Burst") >> return False
+    else return True
+
 ------------------------------------------------------------------------
-turn
-  :: IORef [Card]
-  -> (IORef [Card] -> IO ())
-  -> (IORef [Card] -> IO Bool)
-  -> IO ()
-turn player printer action = do
-  printer player
-  continueP <- action player
-  if continueP
-    then do turn player printer action
+type Check = Player -> IO Bool
+type Action = Player -> IO Bool
+
+------------------------------------------------------------------------
+------------------------------------------------------------------------
+turn :: Check -> Action -> Player -> IO ()
+turn check action player = do
+  ch <- check player
+  if ch
+    then do
+    continueP <- action player
+    if continueP
+      then do turn check action player
+      else return ()
     else return ()
+
 ------------------------------------------------------------------------
-dealerAction :: (IORef [Card] -> IO Card) -> IORef [Card] -> IO Bool
-dealerAction draw player = do
-  score <- readIORef player >>= return . sum . map toScore
+dealerAction :: Action
+dealerAction player = do
+  (_, hand) <- readIORef player
+  score <- return $ sum $ map toScore hand
   if 17 > score
-    then draw player >>= putStrLn . ("Draw: " ++ ) . show >> return True
+    then draw player >> return True
     else return False
 
 ------------------------------------------------------------------------
-playerAction :: (IORef [Card] -> IO Card) -> IORef [Card] -> IO Bool
-playerAction draw player = do
-  s <- readIORef player >>= return . sum . map toScore
-  if 21 < s
-    then do
-    putStrLn "Player : Burst"
-    return False
-    else do
-    putStrLn "Player : Hit or Stand?[H/S]"
-    l <- getLine >>= return . toUpper . head
-    case l of
-      'H' -> do draw player >>= putStrLn . ("Draw: " ++ ) . show >> return True
-      'S' -> return False
+playerAction :: Action
+playerAction player = do
+  (name, _) <- readIORef player
+  putStrLn $ name ++ ": Hit or Stand?[H/S]"
+  cmd <- getLine >>= return . toUpper . head
+  case cmd of
+    'S' -> return False
+    'H' -> draw player >> return True
+    _   -> putStrLn "Bad Command : Hit or Stand?[H/S]"
+           >> playerAction player
 
 ------------------------------------------------------------------------
 game :: Int -> IO ()
 game seed = do
   setStdGen $ mkStdGen seed
-  draw <- (shuffleM fullSetCards >>= newIORef >>= return . drawCard)
-  player <- newIORef [] ; dealer <- newIORef []
+  p <- player ; drawFront p ; draw p
+  d <- dealer ; drawFront d ; draw d
+  _ <- checkStat (map id) p
+  _ <- checkStat (map viewCard) d
   ----------------------------------------------------------------------
-  _ <- draw player ; modifyIORef player (map frontCard) ; _ <- draw player
-  printScore "Player" id player
-  _ <- draw dealer ; modifyIORef dealer (map frontCard) ; _ <- draw dealer
-  printScore "Dealer" (map viewCard) dealer
-  ----------------------------------------------------------------------
-  turn player (printScore "Player" id) (playerAction draw)
-  turn dealer (printScore "Dealer" $ map viewCard) (dealerAction draw)
-  ----------------------------------------------------------------------
+  turn (checkStat $ map id) playerAction p
+  turn (checkStat $ map id) dealerAction d
+
