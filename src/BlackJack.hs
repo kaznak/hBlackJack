@@ -79,35 +79,37 @@ deck = shuffleM fullSetCards >>= newIORef
 ------------------------------------------------------------------------
 type Player = IORef (String, [Card])
 
-dealer :: IO Player
-dealer = newIORef ("Dealer", [])
-
-player :: IO Player
-player = newIORef ("Player", [])
-
 ------------------------------------------------------------------------
-draw' :: (Card -> Card) -> Player -> IO ()
-draw' op player = do
+draw' :: (Card -> Card) -> (Card -> Card) -> Player -> IO ()
+draw' op view player = do
   d <- deck
   cs <- readIORef d
   card <- return $ op $ head cs
   (name, hand) <- readIORef player
   writeIORef d $ tail cs
   writeIORef player (name, card:hand)
-  putStrLn $ name ++ " draw " ++ (show card)
+  putStrLn $ name ++ " draw " ++ (show $ view card)
 
 drawFront :: Player -> IO()
-drawFront = draw' frontCard
+drawFront = draw' frontCard id
 
-draw :: Player -> IO()
-draw = draw' id
-  
+drawOpen :: Player -> IO()
+drawOpen = draw' id id
+
+drawView :: Player -> IO()
+drawView = draw' id viewCard
+
 ------------------------------------------------------------------------
-checkStat :: ([Card] -> [Card]) -> Player -> IO Bool
-checkStat view player = do
+viewPlayer :: ([Card] -> [Card]) -> Player -> IO ()
+viewPlayer view player = do
+  (name, hand) <- readIORef player
+  putStrLn $ ((name ++) ": " ++ ) $ show $ view hand
+
+------------------------------------------------------------------------
+checkStat :: Player -> IO Bool
+checkStat player = do
   (name, hand) <- readIORef player
   score <- return $ sum $ map toScore hand
-  putStrLn $ ((name ++) ": " ++ ) $ show $ view hand
   putStrLn $ ((name ++) ": " ++ ) $ show score
   if score > 21
     then putStrLn (name ++ ": Burst") >> return False
@@ -121,6 +123,7 @@ type Action = Player -> IO Bool
 ------------------------------------------------------------------------
 turn :: Check -> Action -> Player -> IO ()
 turn check action player = do
+  viewPlayer (map id) player
   ch <- check player
   if ch
     then do
@@ -136,7 +139,7 @@ dealerAction player = do
   (_, hand) <- readIORef player
   score <- return $ sum $ map toScore hand
   if 17 > score
-    then draw player >> return True
+    then drawOpen player >> return True
     else return False
 
 ------------------------------------------------------------------------
@@ -147,7 +150,7 @@ playerAction player = do
   cmd <- getLine >>= return . toUpper . head
   case cmd of
     'S' -> return False
-    'H' -> draw player >> return True
+    'H' -> drawOpen player >> return True
     _   -> putStrLn "Bad Command : Hit or Stand?[H/S]"
            >> playerAction player
 
@@ -155,11 +158,10 @@ playerAction player = do
 game :: Int -> IO ()
 game seed = do
   setStdGen $ mkStdGen seed
-  p <- player ; drawFront p ; draw p
-  d <- dealer ; drawFront d ; draw d
-  _ <- checkStat (map id) p
-  _ <- checkStat (map viewCard) d
+  p <- newIORef ("Player", []) ; drawFront p ; drawOpen p
+  -- viewPlayer id p ;
+  d <- newIORef ("Dealer", []) ; drawFront d ; drawView d
+  -- viewPlayer (map viewCard) d ; 
   ----------------------------------------------------------------------
-  turn (checkStat $ map id) playerAction p
-  turn (checkStat $ map id) dealerAction d
-
+  turn checkStat playerAction p
+  turn checkStat dealerAction d
