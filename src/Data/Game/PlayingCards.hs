@@ -11,17 +11,15 @@ module Data.Game.PlayingCards
     , Value(..)
     , Side(..)
 
+    , fullSetCards    
+
+    , isJoker
+    
     , flipCard
     , frontCard
+    , backCard
     , viewCard
-
-    , makeDeck
-    , flipDeck
-    , shuffleDeck
-    , drawCards
     ) where
-
-import System.Random.Shuffle
 
 ------------------------------------------------------------------------
 -- | Card type definition.
@@ -42,26 +40,24 @@ data Card = Card
   { suit  :: Suit
   , value :: Value
   , side  :: Side
-  } | Jorker
+  } | Joker
   { side :: Side
   } | BackCard
   deriving (Show, Read, Eq, Ord)
 
-
 ------------------------------------------------------------------------
-makeDeck
-  :: Int  -- ^ number of jorkers
-  -> [Card]
-makeDeck nj = cards ++ jorkers
-  where jorkers = take nj $ repeat $ Jorker Front
-        cards = [Card s v Front|s <- [Club .. Spade], v <- [Ace .. King]]
+fullSetCards :: [Card]
+fullSetCards = jokers ++ cards
+  where
+    jokers = replicate 2 $ Joker Front
+    cards = [Card s v Front|s <- [Club .. Spade], v <- [Ace .. King]]
 
 ------------------------------------------------------------------------
 flipCard
   :: Card
   -> Card
-flipCard (Jorker Front)   = Jorker Back
-flipCard (Jorker Back)    = Jorker Front
+flipCard (Joker Front)   = Joker Back
+flipCard (Joker Back)    = Joker Front
 flipCard (Card s v Front) = Card s v Back
 flipCard (Card s v Back)  = Card s v Front
 flipCard BackCard         = error "try to flip BackCard."
@@ -70,36 +66,31 @@ flipCard BackCard         = error "try to flip BackCard."
 frontCard
   :: Card
   -> Card
-frontCard (Jorker _)    = Jorker Front
+frontCard (Joker _)    = Joker Front
 frontCard (Card s v _)  = Card s v Front
 frontCard BackCard      = error "try to flip BackCard."
+
+------------------------------------------------------------------------
+backCard
+  :: Card
+  -> Card
+backCard (Joker _)    = Joker Back
+backCard (Card s v _)  = Card s v Back
+backCard BackCard      = error "try to flip BackCard."
 
 ------------------------------------------------------------------------
 viewCard
   :: Card
   -> Card
-viewCard (Jorker Front)   = Jorker Back
-viewCard (Jorker Back)    = BackCard
-viewCard (Card s v Front) = Card s v Back
+viewCard (Joker Front)   = Joker Front
+viewCard (Joker Back)    = BackCard
+viewCard (Card s v Front) = Card s v Front
 viewCard (Card _ _ Back)  = BackCard
 viewCard BackCard         = BackCard
 
 ------------------------------------------------------------------------
-flipDeck
-  :: [Card]
-  -> [Card]
-flipDeck deck = reverse $ map flipCard deck
-
-------------------------------------------------------------------------
-shuffleDeck
-  :: [Card] -- ^ Deck (c1, c2 .. cn)
-  -> [Int]  -- ^ Sample Number (r1, r2 .. r(n-1))
-  -> [Card]    
-shuffleDeck deck r = shuffle deck r
-
-------------------------------------------------------------------------
-drawCards
-  :: [Card]           -- ^ Deck
-  -> Int              -- ^ Number of cards
-  -> ([Card], [Card]) -- ^ Took cards and Rest cards
-drawCards d n = (take n d, drop n d)
+isJoker
+  :: Card
+  -> Bool
+isJoker (Joker _) = True
+isJoker _         = False
