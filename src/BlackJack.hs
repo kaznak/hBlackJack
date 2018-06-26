@@ -19,11 +19,13 @@ module BlackJack
 import Data.Char
 import Data.List
 import Data.Maybe
+import Data.Either
 
 import System.Random
 
 import Control.Monad.IO.Class
 import Control.Monad.State
+import Control.Monad.Except
 
 ------------------------------------------------------------------------
 -- | Card type definition.
@@ -101,6 +103,10 @@ addHand :: Card -> Player -> Player
 addHand c (Player n h) = Player n (c:h)
 
 ------------------------------------------------------------------------
+playerScore :: Player -> Int
+playerScore (Player _ h) = toScore h
+
+------------------------------------------------------------------------
 ------------------------------------------------------------------------
 data Table = Table
   { deck   :: [Card]
@@ -124,15 +130,25 @@ data GameState = GameState
   ( Show
   )
 
+data GameOver = Burst String
+              | Win String
+              deriving
+                ( Show
+                )
+
 newtype Game a = Game
-  { runGame :: StateT GameState IO a
+  { runGame :: ExceptT GameOver (StateT GameState IO) a
   } deriving
   ( Functor
   , Applicative
   , Monad
   , MonadState GameState
   , MonadIO
+  , MonadError GameOver
   )
+
+gameOver :: GameOver -> Game a
+gameOver reason = throwError reason
 
 ------------------------------------------------------------------------
 findPlayer :: String -> GameState -> Maybe (Int, Player)
@@ -199,22 +215,21 @@ findPlayerGS n gs = return $ snd $ fromJust $ findPlayer n gs
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
-checkStat :: Player -> Game Bool
-checkStat (Player n h) = do
-  score <- return $ toScore h
+checkStat :: Player -> Game ()
+checkStat p@(Player n _) = do
+  score <- return $ playerScore p
   if 22 > score
     then do liftIO $ putStrLn $ n ++ " Score: " ++ (show score)
-            return True
     else do liftIO $ putStrLn $ n ++ " Score: " ++ (show score) ++ " Burst!"
-            return False
+            gameOver $ Burst n
 
 ------------------------------------------------------------------------
 type Action = Player -> Game Bool
 
 ------------------------------------------------------------------------
 dealerAction :: Action
-dealerAction (Player n h) = do
-  score <- return $ toScore h
+dealerAction p@(Player n _) = do
+  score <- return $ playerScore p
   if 17 > score
     then do c <- drawFront n
             liftIO $ putStrLn $ n ++ " draw " ++ (show c)
@@ -232,43 +247,55 @@ playerAction p@(Player n _) = do
               liftIO $ putStrLn $ n ++ " draw " ++ (show c)
               return True
     _   -> do liftIO $ putStrLn "Bad Command : Hit or Stand?[H/S]"
-              playerAction p
-
+              return False
+  
 ------------------------------------------------------------------------
 turn :: (Player -> Game Bool) -> String -> Game ()
 turn action n = do
   gs <- get
   p <- findPlayerGS n gs
   liftIO $ putStrLn $ show p
-  ch <- checkStat p
-  if ch
-    then do
-    continueP <- action p
-    if continueP
-      then do turn action n
-      else return ()
+  checkStat p
+  cont <- action p
+  if cont
+    then turn action n
     else return ()
 
 ------------------------------------------------------------------------
-gameExec :: Game ()
+resoultGame' :: GameState -> (GameOver, GameState)
+resoultGame' gs
+  | ds >= ps  = (Win "Dealer", gs)
+  | otherwise = (Win "Player", gs)
+  where
+    ds = playerScore $ snd $ fromJust $ findPlayer "Dealer" gs
+    ps = playerScore $ snd $ fromJust $ findPlayer "Player" gs
+
+resultGame :: Game GameOver
+resultGame = state resoultGame'
+
+------------------------------------------------------------------------
+gameExec :: Game GameOver
 gameExec = do
   shuffleDeck ;
   let n = "Player"
-    in do c <- drawFront n
-          liftIO $ putStrLn $ n ++ " draw " ++ (show c)
-          c <- drawSelf  n
-          liftIO $ putStrLn $ n ++ " draw " ++ (show c)
+    in do c1 <- drawFront n
+          liftIO $ putStrLn $ n ++ " draw " ++ (show c1)
+          c2 <- drawSelf  n
+          liftIO $ putStrLn $ n ++ " draw " ++ (show c2)
   let n = "Dealer"
-    in do c <- drawFront n
-          liftIO $ putStrLn $ n ++ " draw " ++ (show c)
-          c <- drawView  n
-          liftIO $ putStrLn $ n ++ " draw " ++ (show c)
+    in do c1 <- drawFront n
+          liftIO $ putStrLn $ n ++ " draw " ++ (show c1)
+          c2 <- drawView  n
+          liftIO $ putStrLn $ n ++ " draw " ++ (show c2)
   ----------------------------------------------------------------------
   turn playerAction "Player"
   turn dealerAction "Dealer"
   ----------------------------------------------------------------------
-  return ()
+  resultGame
 
 ------------------------------------------------------------------------
 game :: Int -> IO ()
-game seed = runStateT (runGame gameExec) (initGame' seed) >> return ()
+game seed = do
+  run <- return $ runStateT $ runExceptT $ runGame gameExec
+  (endState, _) <- run (initGame' seed)
+  putStrLn $ show $ endState
