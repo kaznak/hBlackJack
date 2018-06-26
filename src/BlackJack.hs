@@ -15,6 +15,8 @@ module BlackJack
   ) where
 
 import Data.Char
+import Data.List
+import Data.Maybe
 -- import Data.Functor
 import Data.IORef
 
@@ -61,13 +63,24 @@ viewCard (Card _ _ Back) = BackCard
 viewCard BackCard = BackCard
 
 ------------------------------------------------------------------------
-toScore :: Card -> Int
-toScore (Card _ v _) = score
-  where
-    s = 1 + fromEnum v
-    score = if s < 10
-            then s
-            else 10
+toScore' :: Card -> [Int]
+toScore' (Card _ v _)
+  | v == Ace              = [1,11]
+  | elem v [Jack .. King] = [10]
+  | otherwise             = [1 + fromEnum v]
+toScore' _                = error "can not get score"
+
+------------------------------------------------------------------------
+directProcutList :: [[a]] -> [[a]]
+directProcutList = foldl (\ls vs -> [ v : l | v <- vs, l <- ls ]) [[]]
+
+toScore :: [Card] -> Int
+toScore cs =
+  let (s, b) = span (<22) $ sort $ map sum $
+               directProcutList $ map toScore' cs
+  in if null s
+     then minimum b
+     else maximum s
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
@@ -109,11 +122,11 @@ viewPlayer view player = do
 checkStat :: Player -> IO Bool
 checkStat player = do
   (name, hand) <- readIORef player
-  score <- return $ sum $ map toScore hand
-  putStrLn $ ((name ++) ": " ++ ) $ show score
-  if score > 21
-    then putStrLn (name ++ ": Burst") >> return False
-    else return True
+  score <- return $ toScore hand
+  putStrLn $ name ++ ": " ++ (show score)
+  if 22 > score
+    then return True
+    else putStrLn (name ++ ": Burst") >> return False
 
 ------------------------------------------------------------------------
 type Check = Player -> IO Bool
@@ -137,7 +150,7 @@ turn check action player = do
 dealerAction :: Action
 dealerAction player = do
   (_, hand) <- readIORef player
-  score <- return $ sum $ map toScore hand
+  score <- return $ toScore hand
   if 17 > score
     then drawOpen player >> return True
     else return False
