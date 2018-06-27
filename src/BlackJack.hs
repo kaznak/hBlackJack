@@ -7,13 +7,13 @@ module BlackJack
   , Side(..)
   , Card(..)
 
-  , fullSetCards
+--   , fullSetCards
 
-  , frontCard
-  , viewCard
+--   , frontCard
+--   , viewCard
 
-------------------------------------------------------------------------
-  , game
+-- ------------------------------------------------------------------------
+--   , game
   ) where
 
 import Data.Char
@@ -23,6 +23,8 @@ import Data.Either
 
 import System.Random
 
+import Data.Game.PlayingCards.Class
+  
 import Control.Monad.IO.Class
 import Control.Monad.State
 import Control.Monad.Except
@@ -50,71 +52,75 @@ data Card = Card
   deriving (Show, Read, Eq, Ord)
 
 ------------------------------------------------------------------------
-fullSetCards :: [Card]
-fullSetCards = [ Card s v  Back |
-                 s <- [Club .. Spade], v <- [Ace .. King] ]
-
-------------------------------------------------------------------------
 frontCard :: Card -> Card
 frontCard (Card s v _) = (Card s v Front)
 frontCard BackCard = error "BackCard"
 
 ------------------------------------------------------------------------
-viewCard :: Card -> Card
-viewCard c@(Card _ _ Front) = c
-viewCard (Card _ _ Back) = BackCard
-viewCard BackCard = BackCard
+instance Viewable Card where
+  view c@(Card _ _ Front) = c
+  view _                  = BackCard
 
 ------------------------------------------------------------------------
-toScore' :: Card -> [Int]
-toScore' (Card _ v _)
-  | v == Ace              = [1,11]
-  | elem v [Jack .. King] = [10]
-  | otherwise             = [1 + fromEnum v]
-toScore' _                = error "can not get score"
+instance Scoreable' Card where
+  score' (Card _ v _)
+    | v == Ace              = [1,11]
+    | elem v [Jack .. King] = [10]
+    | otherwise             = [1 + fromEnum v]
+  score' _                  = error "can not get score"
 
 ------------------------------------------------------------------------
 directProcutList :: [[a]] -> [[a]]
 directProcutList = foldl (\ls vs -> [ v : l | v <- vs, l <- ls ]) [[]]
 
-toScore :: [Card] -> Int
-toScore cs =
-  let (s, b) = span (<22) $ sort $ map sum $
-               directProcutList $ map toScore' cs
-  in if null s
-     then head b -- == minimum b -- assume that b is sorted.
-     else last s -- == maximum s -- assume that s is sorted.
+------------------------------------------------------------------------
+newtype CardS = CardS
+  { cards :: [Card]
+  } deriving (Show, Read, Eq, Ord)
+
+------------------------------------------------------------------------
+fullSetCards :: CardS
+fullSetCards = CardS [ Card s v  Back |
+                      s <- [Club .. Spade], v <- [Ace .. King] ]
+
+------------------------------------------------------------------------
+instance Viewable CardS where
+  view (CardS cs) = CardS $ map view cs
+  
+instance Scoreable' CardS where
+  score' (CardS cs) =
+    let (s, b) = span (<22) $ sort $ map sum $
+                 directProcutList $ map score' cs
+    in if null s
+       then [head b] -- == minimum b -- assume that b is sorted.
+       else [last s] -- == maximum s -- assume that s is sorted.
+
+instance Scoreable CardS -- where
+  -- score cs = head $ score' cs
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
-data Player = Player
+data BJPlayer = BJPlayer
   { name :: String
-  , hand :: [Card]
+  , hand :: CardS
   } deriving
   ( Show
   )
 
 ------------------------------------------------------------------------
-viewPlayer :: Player -> Player
-viewPlayer (Player n h) = Player n (map viewCard h)
+instance Viewable BJPlayer where
+  view (BJPlayer n h) = BJPlayer n (view h)
+
+instance Scoreable' BJPlayer where
+  score' (BJPlayer _ h) = score' h
+
+instance Scoreable BJPlayer
 
 ------------------------------------------------------------------------
-addHand :: Card -> Player -> Player
-addHand c (Player n h) = Player n (c:h)
+addHand :: Card -> BJPlayer -> BJPlayer
+addHand c (BJPlayer n (CardS h)) = BJPlayer n $ CardS (c:h)
 
 ------------------------------------------------------------------------
-playerScore :: Player -> Int
-playerScore (Player _ h) = toScore h
-
-------------------------------------------------------------------------
-------------------------------------------------------------------------
-data Table = Table
-  { deck   :: [Card]
-  , player :: [Player]
-  } deriving
-  ( Show
-  )
-
 ------------------------------------------------------------------------
 updateList :: (Int, a) -> [a] -> [a]
 updateList (i, v') l = left ++ [v'] ++ (tail right)
@@ -123,52 +129,52 @@ updateList (i, v') l = left ++ [v'] ++ (tail right)
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
-data GameState = GameState
-  { gen :: StdGen
-  , tbl :: Table
-  } deriving
-  ( Show
-  )
+data BJState = BJState
+  { gen     :: StdGen
+  , deck    :: CardS
+  , players :: [BJPlayer]
+  } deriving ( Show )
 
-data GameOver = Burst String
-              | Win String
-              deriving
-                ( Show
-                )
+findPlayerBy :: (BJPlayer -> Bool) -> BJState -> Maybe (Int, BJPlayer)
+findPlayerBy f ps = do
+  pl  <- return $ players ps
+  ind <- findIndex f pl
+  return (ind, pl!!ind)
 
+------------------------------------------------------------------------
+findPlayer' :: String -> BJState -> Maybe (Int, BJPlayer)
+findPlayer' n st = findPlayerBy ((n ==) . name) st
+
+findPlayer :: String -> BJState -> BJPlayer
+findPlayer n st = p
+  where
+    (_, p) = fromJust $ findPlayer' n st
+
+------------------------------------------------------------------------
 newtype Game a = Game
-  { runGame :: ExceptT GameOver (StateT GameState IO) a
+  { runGame :: ExceptT GamePhase (StateT BJState IO) a
   } deriving
   ( Functor
   , Applicative
   , Monad
-  , MonadState GameState
+  , MonadState BJState
   , MonadIO
-  , MonadError GameOver
+  , MonadError GamePhase
   )
 
-gameOver :: GameOver -> Game a
-gameOver reason = throwError reason
-
 ------------------------------------------------------------------------
-findPlayer :: String -> GameState -> Maybe (Int, Player)
-findPlayer n (GameState _ (Table _ ps)) = do
-  ind <- findIndex ((n ==) . name) ps
-  -- assert n == (name $ ps!!ind)
-  return (ind, ps!!ind)
-
-------------------------------------------------------------------------
-initGame' :: Int -> GameState
-initGame' seed = GameState (mkStdGen seed) $
-  Table fullSetCards [ (Player "Dealer" [])
-                     , (Player "Player" []) ]
+initGame' :: Int -> BJState
+initGame' seed = BJState
+  (mkStdGen seed) fullSetCards
+  [ (BJPlayer "Dealer" (CardS []))
+  , (BJPlayer "Player" (CardS [])) ]
 
 initGame :: Int -> Game ()
 initGame = put . initGame'
 
 ------------------------------------------------------------------------
-shuffleDeck' :: GameState -> GameState
-shuffleDeck' (GameState g (Table d p)) = GameState g' $ Table d' p
+shuffleDeck' :: BJState -> BJState
+shuffleDeck' (BJState g (CardS d) p) = BJState g' (CardS d') p
   where
     l = length d
     (ind, g') = runState (replicateM l $ state $ randomR (1,l)) g
@@ -178,58 +184,51 @@ shuffleDeck :: Game ()
 shuffleDeck = modify shuffleDeck'
 
 ------------------------------------------------------------------------
-draw' :: (Card -> Card) -> (Card -> Card) -> String -> GameState -> (Card, GameState)
-draw' op view pn gs@(GameState g (Table d ps)) =
-  (c'', GameState g (Table d' ps'))
+draw' :: (Card -> Card) -> (Card -> Card) -> String -> BJState -> (Card, BJState)
+draw' op view pn s@(BJState g (CardS d) ps) =
+  (c'', BJState g (CardS d') ps')
   where
     ([c], d') = splitAt 1 d
     c' = op c
-    (i, p) = fromJust $ findPlayer pn gs
+    (i, p) = fromJust $ findPlayer' pn s
     ps' = updateList (i,addHand c' p) ps
     c'' = view c'
 
-drawFront' :: String -> GameState -> (Card, GameState)
-drawFront' = draw' frontCard viewCard
+drawFront' :: String -> BJState -> (Card, BJState)
+drawFront' = draw' frontCard view
 
 drawFront :: String -> Game Card
 drawFront = state . drawFront'
 
-drawSelf' :: String -> GameState -> (Card, GameState)
+drawSelf' :: String -> BJState -> (Card, BJState)
 drawSelf' = draw' id id
 
 drawSelf :: String -> Game Card
 drawSelf = state . drawSelf'
 
-drawView' :: String -> GameState -> (Card, GameState)
-drawView' = draw' id viewCard
+drawView' :: String -> BJState -> (Card, BJState)
+drawView' = draw' id view
 
 drawView :: String -> Game Card
 drawView = state . drawView'
 
 ------------------------------------------------------------------------
-viewPlayerGS :: String -> (Player -> Player) -> GameState -> IO ()
-viewPlayerGS n view gs = putStrLn $ show $ view $ snd $ fromJust $ findPlayer n gs
-
-findPlayerGS :: String -> GameState -> Game Player
-findPlayerGS n gs = return $ snd $ fromJust $ findPlayer n gs
-
 ------------------------------------------------------------------------
-------------------------------------------------------------------------
-checkStat :: Player -> Game ()
-checkStat p@(Player n _) = do
-  score <- return $ playerScore p
+checkStat :: BJPlayer -> Game ()
+checkStat p@(BJPlayer n _) = do
+  score <- return $ score p
   if 22 > score
     then do liftIO $ putStrLn $ n ++ " Score: " ++ (show score)
     else do liftIO $ putStrLn $ n ++ " Score: " ++ (show score) ++ " Burst!"
-            gameOver $ Burst n
+            throwError GameOver
 
 ------------------------------------------------------------------------
-type Action = Player -> Game Bool
+type Action = BJPlayer -> Game Bool
 
 ------------------------------------------------------------------------
 dealerAction :: Action
-dealerAction p@(Player n _) = do
-  score <- return $ playerScore p
+dealerAction p@(BJPlayer n _) = do
+  score <- return $ score p
   if 17 > score
     then do c <- drawFront n
             liftIO $ putStrLn $ n ++ " draw " ++ (show c)
@@ -238,7 +237,7 @@ dealerAction p@(Player n _) = do
 
 ------------------------------------------------------------------------
 playerAction :: Action
-playerAction p@(Player n _) = do
+playerAction p@(BJPlayer n _) = do
   liftIO $ putStrLn $ n ++ ": Hit or Stand?[H/S]"
   cmd <- return . toUpper . head =<< liftIO getLine
   case cmd of
@@ -250,10 +249,10 @@ playerAction p@(Player n _) = do
               return False
   
 ------------------------------------------------------------------------
-turn :: (Player -> Game Bool) -> String -> Game ()
+turn :: (BJPlayer -> Game Bool) -> String -> Game ()
 turn action n = do
   gs <- get
-  p <- findPlayerGS n gs
+  p <- return $ findPlayer n gs
   liftIO $ putStrLn $ show p
   checkStat p
   cont <- action p
@@ -262,21 +261,24 @@ turn action n = do
     else return ()
 
 ------------------------------------------------------------------------
-resoultGame' :: GameState -> (GameOver, GameState)
+resoultGame' :: BJState -> (String, BJState)
 resoultGame' gs
-  | ds >= ps  = (Win "Dealer", gs)
-  | otherwise = (Win "Player", gs)
+  | 21 >= ds && ds >= ps  = ("Win Dealer", gs)
+  | 21 >= ps && ps >  ds  = ("Win Player", gs)
+  | ps > 21               = ("Win Dealer", gs)
+  | ds > 21               = ("Win Player", gs)
+  | otherwise             = ("Draw", gs)
   where
-    ds = playerScore $ snd $ fromJust $ findPlayer "Dealer" gs
-    ps = playerScore $ snd $ fromJust $ findPlayer "Player" gs
+    ds = score $ findPlayer "Dealer" gs
+    ps = score $ findPlayer "Player" gs
 
-resultGame :: Game GameOver
+resultGame :: Game String
 resultGame = state resoultGame'
 
 ------------------------------------------------------------------------
-gameExec :: Game GameOver
-gameExec = do
-  shuffleDeck ;
+gameExec' :: Game String
+gameExec' = do
+  shuffleDeck
   let n = "Player"
     in do c1 <- drawFront n
           liftIO $ putStrLn $ n ++ " draw " ++ (show c1)
@@ -293,9 +295,13 @@ gameExec = do
   ----------------------------------------------------------------------
   resultGame
 
+gameExec :: Game String
+gameExec = do
+  catchError gameExec' (const resultGame)
+
 ------------------------------------------------------------------------
 game :: Int -> IO ()
 game seed = do
   run <- return $ runStateT $ runExceptT $ runGame gameExec
-  (endState, _) <- run (initGame' seed)
+  (endState, _) <- run $ initGame' seed
   putStrLn $ show $ endState

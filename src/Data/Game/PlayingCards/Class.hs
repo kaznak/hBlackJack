@@ -2,17 +2,18 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module Data.Game.PlayingCards.Class
-  ( Scoreable'(..)
+  ( Viewable(..)
+  , Scoreable'(..)
   , Scoreable(..)
 
-  , Player(..)
-  , PlayerS(..)
-
-  , GameState(..)
-  , Game(..)
+  , GamePhase(..)
   ) where
+
+import Data.List
+import Data.Maybe
 
 import System.Random
 
@@ -21,29 +22,17 @@ import Control.Monad.State
 import Control.Monad.Except
 
 ------------------------------------------------------------------------
+class Viewable a where
+  view :: a -> a
+
+------------------------------------------------------------------------
 class Scoreable' a where
   score' :: a -> [Int]
 
 ------------------------------------------------------------------------
 class Scoreable' a => Scoreable a where
   score :: a -> Int
-  score = head . score'
-
-------------------------------------------------------------------------
-class (Eq a, Scoreable a) => Player a where
-  name   :: a -> String
-
-------------------------------------------------------------------------
-class (Scoreable' a) => PlayerS a where
-  player       :: Player b => a -> [b]
-  findPlayer   :: Player b => String -> a -> Maybe b
-  updatePlayer :: Player b => b -> Maybe a
-
-------------------------------------------------------------------------
-data PlayerResult = Win
-                  | Lose
-                  | Draw
-                  deriving ( Show, Read, Eq, Ord, Enum, Bounded )
+  score cs = head $ score' $ cs
 
 ------------------------------------------------------------------------
 data GamePhase = Playing
@@ -51,18 +40,3 @@ data GamePhase = Playing
                deriving ( Show, Read, Eq )
 
 ------------------------------------------------------------------------
-class GameState a where
-  gen     :: RandomGen g => a -> g
-  players :: PlayerS p => a -> p
-
-------------------------------------------------------------------------
-data Game a b = Game
-  { runGame :: ExceptT GamePhase (StateT a IO) b
-  } deriving
-  ( Functor
-  , Applicative
-  , Monad
-  , MonadState a
-  , MonadIO
-  , MonadError GamePhase
-  )
