@@ -15,6 +15,10 @@ main
 
 ## History
 
+### 52c9803e2727fdacad67c853d192ff4c489abb3e
+冗長だったり不要なな部分を削除
+でも多分もっと削れる
+
 ### 76fcb1f1db3afde940227adcaa79b8cdffbe39e6
 説明のため 1 ファイルに全部入れ込む
 
