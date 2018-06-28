@@ -32,52 +32,19 @@ data Card = Card
   { suit  :: Suit
   , value :: Value
   , side  :: Side
-  } | Jorker
-  { side :: Side
   } | BackCard
   deriving (Show, Read, Eq, Ord)
 
 ------------------------------------------------------------------------
-makeDeck
-  :: Int  -- ^ number of jorkers
-  -> [Card]
-makeDeck nj = cards ++ jorkers
-  where jorkers = take nj $ repeat $ Jorker Front
-        cards = [Card s v Front|s <- [Club .. Spade], v <- [Ace .. King]]
-
-------------------------------------------------------------------------
-flipCard
-  :: Card
-  -> Card
-flipCard (Jorker Front)   = Jorker Back
-flipCard (Jorker Back)    = Jorker Front
-flipCard (Card s v Front) = Card s v Back
-flipCard (Card s v Back)  = Card s v Front
-flipCard BackCard         = error "try to flip BackCard."
-
-------------------------------------------------------------------------
-frontCard
-  :: Card
-  -> Card
-frontCard (Jorker _)    = Jorker Front
+frontCard :: Card -> Card
 frontCard (Card s v _)  = Card s v Front
 frontCard BackCard      = error "try to flip BackCard."
 
 ------------------------------------------------------------------------
-viewCard
-  :: Card
-  -> Card
-viewCard (Jorker Front)   = Jorker Back
-viewCard (Jorker Back)    = BackCard
+viewCard :: Card -> Card
 viewCard (Card s v Front) = Card s v Back
 viewCard (Card _ _ Back)  = BackCard
 viewCard BackCard         = BackCard
-
-------------------------------------------------------------------------
-flipDeck
-  :: [Card]
-  -> [Card]
-flipDeck deck = reverse $ map flipCard deck
 
 ------------------------------------------------------------------------
 shuffleDeck
@@ -120,17 +87,6 @@ dropHand
 dropHand (Player n _) = Player n []
 
 ------------------------------------------------------------------------
-flipHand
-  :: Int       -- ^ Index of hand that to be flipped
-  -> Player    -- ^ previous player state
-  -> Player    -- ^ next player state
-flipHand ind (Player n h) = Player n h'
-  where
-    h' = p ++ [(flipCard $ h !! ind)] ++ r
-    p  = take ind h
-    r  = drop (ind + 1) h
-
-------------------------------------------------------------------------
 viewPlayer
   :: Player    -- ^ previous player state
   -> Player    -- ^ next player state
@@ -144,7 +100,6 @@ viewPlayer (Player n h) = Player n h'
 data Table = Table
   { gen    :: StdGen
   , deck   :: [Card]
-  , grave  :: [Card]   -- ^ Discarded cards.
   , player :: [Maybe Player] -- ^ Players.
   } deriving Show
 
@@ -156,7 +111,6 @@ makeTable
 makeTable seed seats = Table
   { gen    = mkStdGen seed
   , deck   = []
-  , grave  = []
   , player = replicate seats Nothing
   }
 
@@ -164,22 +118,15 @@ makeTable seed seats = Table
 clearDeck
   :: Table -- ^ Previous table state
   -> Table -- ^ New table state
-clearDeck (Table rg _ g p) = (Table rg [] g p)
+clearDeck (Table rg _ p) = (Table rg [] p)
 
 ------------------------------------------------------------------------
 newDeck
   :: Table -- ^ Previous table state
   -> Table -- ^ New table state
-newDeck (Table rg _ g p) = (Table rg d g p)
+newDeck (Table rg _ p) = (Table rg d p)
   where
-    d :: [Card]
-    d = makeDeck 0
-
-------------------------------------------------------------------------
-flipDeckT
-  :: Table -- ^ Previous table state
-  -> Table -- ^ New table state
-flipDeckT (Table rg d g p) = (Table rg (flipDeck d) g p)
+    d = [Card s v Back|s <- [Club .. Spade], v <- [Ace .. King]]
 
 ------------------------------------------------------------------------
 rseq :: RandomGen gen => Int -> gen -> ([Int],[gen])
@@ -196,7 +143,7 @@ rseq' i rg = (j, rg) : rseq' (i - 1) rg'
 shuffleDeckT
   :: Table -- ^ Previous table state
   -> Table -- ^ New table state
-shuffleDeckT (Table rg d g p) = (Table rg' d' g p)
+shuffleDeckT (Table rg d p) = (Table rg' d' p)
   where
     d' = shuffleDeck d r
 
@@ -206,23 +153,11 @@ shuffleDeckT (Table rg d g p) = (Table rg' d' g p)
     result = rseq (length d) rg
 
 ------------------------------------------------------------------------
-clearGrave
-  :: Table -- ^ Previous table state
-  -> Table -- ^ New table state
-clearGrave (Table rg d _ p) = (Table rg d [] p)
-
-------------------------------------------------------------------------
-reviveGrave
-  :: Table -- ^ Previous table state
-  -> Table -- ^ New table state
-reviveGrave (Table rg d g p) = (Table rg (g ++ d) [] p)
-
-------------------------------------------------------------------------
 findPlayerSeat
   :: String    -- ^ player name
   -> Table     -- ^ table
   -> Maybe Int -- ^ seat number
-findPlayerSeat n (Table _ _ _ ps) = findIndex (isName n) ps
+findPlayerSeat n (Table _ _ ps) = findIndex (isName n) ps
   where
     isName _ Nothing = False
     isName name (Just (Player n' _)) = name == n'
@@ -232,21 +167,21 @@ findPlayer
   :: String          -- ^ player name
   -> Table           -- ^ table
   -> Maybe Player -- ^ player
-findPlayer n (Table _ _ _ ps) =
+findPlayer n (Table _ _ ps) =
   find ((n==).name) $ map fromJust $ filter isJust ps
 
 ------------------------------------------------------------------------
 findEmptySeat
   :: Table -- ^ table
   -> [Int] -- ^ seat numbers
-findEmptySeat (Table _ _ _ ps) = findIndices isNothing ps
+findEmptySeat (Table _ _ ps) = findIndices isNothing ps
 
 ------------------------------------------------------------------------
 isEmptySeat
   :: Int   -- ^ seat number
   -> Table -- ^ table
   -> Bool  -- ^ seat numbers
-isEmptySeat sn (Table _ _ _ ps) = isNothing $ ps !! sn
+isEmptySeat sn (Table _ _ ps) = isNothing $ ps !! sn
 
 ------------------------------------------------------------------------
 addPlayer
@@ -264,7 +199,7 @@ updateSeat
   -> Int    -- ^ Seat Number
   -> Table  -- ^ Previous table state
   -> Table  -- ^ New table state
-updateSeat p sn (Table rg d g ps) = Table rg d g ps'
+updateSeat p sn (Table rg d ps) = Table rg d ps'
   where
     ps'  = left ++ [Just p] ++ right
     left = take sn ps
@@ -276,10 +211,10 @@ drawCard'
   -> String          -- ^ Player name
   -> Table           -- ^ Previous table state
   -> ([Card], Table) -- ^ Card and New table state
-drawCard' act n t@(Table rg d g ps) =
+drawCard' act n t@(Table rg d ps) =
   if isNothing mi
   then error $ "player " ++ n ++ " is not seat."
-  else (cs', Table rg d' g ps')
+  else (cs', Table rg d' ps')
   where
     mi = findPlayerSeat n t
     sn = fromJust mi
@@ -288,7 +223,7 @@ drawCard' act n t@(Table rg d g ps) =
     cs' = map act cs
 
     p' = addHand cs' (fromJust $ ps!!sn)
-    (Table _ _ _ ps') = updateSeat p' sn t
+    (Table _ _ ps') = updateSeat p' sn t
 
 ------------------------------------------------------------------------
 drawCard
@@ -311,10 +246,9 @@ viewTable
   -> Table  -- ^ Players View Table
 viewTable n t | isNothing $ findPlayerSeat n t =
                   error $ "player " ++ n ++ " does not seat."
-viewTable n (Table rg d g ps) | otherwise = Table rg d' g' ps'
+viewTable n (Table rg d ps) | otherwise = Table rg d' ps'
   where
     d' = map viewCard d
-    g' = map viewCard g
     ps' = map viewSeat ps
 
     viewSeat Nothing  = Nothing
@@ -329,8 +263,8 @@ initialTable -- composit function
 initialTable seed =
   snd $ drawCard "Dealer" $ snd $ drawCardFront "Dealer" $ 
   snd $ drawCard "Player" $ snd $ drawCardFront "Player" $ 
-  shuffleDeckT $ flipDeckT  $ newDeck $
-  clearDeck    $ clearGrave $
+  shuffleDeckT $ newDeck $
+  clearDeck    $
   addPlayer (makePlayer "Player") 1 $
   addPlayer (makePlayer "Dealer") 0 $
   makeTable seed 2
@@ -360,7 +294,7 @@ checkScore = sum . map cardScore . hand
 getWinner
   :: Table -- ^ table
   -> [Player]
-getWinner (Table _ _ _ ps) =
+getWinner (Table _ _ ps) =
   if (psc > 21)
   then [d]
   else if dsc > 21
@@ -398,7 +332,7 @@ playerDraw t = do
     putStrLn $ n ++ " Burst."
     return t
   else do
-    putStrLn $ n ++ " Call?[Y/]"
+    putStrLn $ n ++ " Hit?[Y/]"
     c <- fmap (toUpper . head) getLine
     if 'Y' == c
     then do
