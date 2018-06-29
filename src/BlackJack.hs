@@ -1,20 +1,7 @@
 
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module BlackJack
-  ( Suit(..)
-  , Value(..)
-  , Side(..)
-  , Card(..)
-
---   , fullSetCards
-
---   , frontCard
---   , viewCard
-
--- ------------------------------------------------------------------------
---   , game
-  ) where
+module BlackJack where
 
 import Data.Char
 import Data.List
